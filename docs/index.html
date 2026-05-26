@@ -168,16 +168,24 @@ async function fetchRSS(cats=null) {
 }
 
 async function fetchTrendMCP(type,limit=20) {
-  const r=await fetch('https://api.trendsmcp.ai/api',{
-    method:'POST',headers:{'Authorization':'Bearer '+KEYS.trendmcp,'Content-Type':'application/json'},
-    body:JSON.stringify({mode:'top_trends',type,limit})
-  });
-  let d=await r.json();
-  if(d.body) d=JSON.parse(d.body);
-  return (d.data||[]).map(([rk,name])=>({
-    id:'tm_'+btoa(name).slice(0,12),title:name,source:type,
-    url:'https://trends.google.com/trends/explore?q='+encodeURIComponent(name),score:rk
-  }));
+  // Google Trends RSS — 公开免费，无需 API Key
+  const url = CORS+encodeURIComponent('https://trends.google.com/trends/trendingsearches/daily/rss?geo=US');
+  try{
+    const r=await fetch(url);
+    const text=await r.text();
+    const parser=new DOMParser();
+    const xml=parser.parseFromString(text,'text/xml');
+    const items=[];
+    xml.querySelectorAll('item').forEach((item,i)=>{
+      if(i>=limit) return;
+      const t=item.querySelector('title')?.textContent;
+      if(t) items.push({
+        id:'gtr_'+btoa(t).slice(0,12),title:t.trim(),source:'Google Trends',
+        url:'https://trends.google.com/trends/explore?q='+encodeURIComponent(t.trim()),score:i+1
+      });
+    });
+    return items;
+  }catch(e){ return []; }
 }
 
 async function translateText(text) {
