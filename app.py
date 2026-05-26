@@ -37,6 +37,7 @@ CAT_COLORS = {
     "📹 视频热点": "#D0659E",
     "🌍 全球热帖": "#5B8FDF",
     "🔍 搜索趋势": "#8B7CF6",
+    "🎵 TT热梗":  "#EE6DB4",
 }
 CAT_KEYS = list(CAT_COLORS.keys())
 
@@ -300,6 +301,7 @@ def api_refresh():
         ("📹 视频热点", fetch_youtube),
         ("🌍 全球热帖", lambda: fetch_reddit({"worldnews": "worldnews+news+all"}, 10)),
         ("🔍 搜索趋势", lambda: fetch_trendmcp("Google Trends", 20)),
+        ("🎵 TT热梗", lambda: fetch_reddit({"tiktok": "TikTokCringe+tiktok+TikTokmemes"}, 15)),
     ]
     for name, func in sections:
         try:

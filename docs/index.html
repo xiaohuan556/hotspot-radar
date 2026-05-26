@@ -89,6 +89,7 @@ const CATS = [
   {name:'📹 视频热点',  color:'#D0659E'},
   {name:'🌍 全球热帖',  color:'#5B8FDF'},
   {name:'🔍 搜索趋势',  color:'#8B7CF6'},
+  {name:'🎵 TT热梗',   color:'#EE6DB4'},
 ];
 
 let allData = {};
@@ -216,6 +217,7 @@ async function refresh() {
     ['📹 视频热点', ()=>fetchYouTube()],
     ['🌍 全球热帖', ()=>fetchReddit('worldnews+news+all',10)],
     ['🔍 搜索趋势', ()=>fetchTrendMCP('Google Trends',20)],
+    ['🎵 TT热梗',   ()=>fetchReddit('TikTokCringe+tiktok+TikTokmemes+TikTokTrends',15)],
   ];
 
   for(let i=0;i<tasks.length;i++) {
