@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>热点雷达</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;background:#F8FAFC;color:#1E293B}
+.app{max-width:1100px;margin:0 auto;padding:24px 32px}
+.header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.logo{font-size:28px}
+.title{font-size:22px;font-weight:800;color:#0F172A}
+.subtitle{font-size:12px;color:#94A3B8;margin-left:4px}
+.spacer{flex:1}
+.btn-refresh{background:#3B82F6;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;padding:10px 22px;cursor:pointer}
+.btn-refresh:hover{background:#2563EB}
+.btn-refresh:disabled{background:#CBD5E1;color:#94A3B8;cursor:not-allowed}
+.status-bar{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.progress-bar{flex:1;height:3px;background:#E2E8F0;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#3B82F6;border-radius:2px;width:0%;transition:width .3s}
+.status-text{font-size:11px;color:#94A3B8;white-space:nowrap}
+.tabs{display:flex;gap:0;border-bottom:2px solid #F1F5F9}
+.tab{padding:10px 18px;font-size:13px;font-weight:500;color:#64748B;background:none;border:none;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--tab-color)}
+.tab.active{color:var(--tab-color);border-bottom-color:var(--tab-color);font-weight:600}
+.content{padding-top:16px}
+.panel{display:none}
+.panel.active{display:block}
+.summary{background:#F8FAFC;border:1px solid #E8ECF1;border-left:4px solid var(--cat-color);border-radius:12px;padding:12px 16px;margin-bottom:12px;font-size:12px;color:#475569;display:none}
+.list-header{display:flex;align-items:center;gap:8px;padding:0 0 8px 0;font-size:10px;font-weight:600;color:#94A3B8}
+.list-header .h-rank{width:24px;text-align:center}
+.h-trans{width:26px}
+.h-bar{width:4px}
+.h-title{flex:1}
+.h-actions{display:flex;align-items:center;gap:8px}
+.btn-translate-all{font-size:10px;padding:3px 10px;border-radius:6px;border:1px solid var(--cat-color);color:var(--cat-color);background:transparent;cursor:pointer;white-space:nowrap}
+.btn-translate-all:hover{background:var(--cat-color-bg)}
+.btn-translate-all:disabled{color:#C0C8D4;border-color:#E2E8F0;cursor:not-allowed}
+.count{font-size:10px;color:#94A3B8;white-space:nowrap}
+.divider{height:1px;background:#F1F5F9;margin-bottom:10px}
+.item-list{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#fff;border:1px solid #E8ECF1;border-radius:10px;cursor:pointer;transition:all .15s}
+.item:hover{background:#F0F6FF;border-color:#BFDBFE}
+.i-rank{width:24px;text-align:center;font-size:11px;font-weight:700;color:var(--cat-color);flex-shrink:0}
+.i-trans{width:26px;height:26px;border-radius:5px;border:1px solid #E8ECF1;border-color:color-mix(in srgb,var(--cat-color) 30%,transparent);color:var(--cat-color);background:transparent;font-size:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.i-trans:hover{background:color-mix(in srgb,var(--cat-color) 12%,transparent)}
+.i-trans.done{background:color-mix(in srgb,var(--cat-color) 15%,transparent)}
+.i-bar{width:4px;height:26px;border-radius:2px;background:var(--cat-color);flex-shrink:0}
+.i-title{flex:1;font-size:13px;color:#1E293B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.i-title.translated{color:var(--cat-color);font-weight:500}
+.i-source{font-size:10px;color:#475569;background:#F1F5F9;border:1px solid #E2E8F0;border-radius:3px;padding:1px 6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0}
+.i-heat{font-size:10px;color:#94A3B8;min-width:46px;text-align:right;flex-shrink:0}
+.hint{color:#94A3B8;font-size:11px;padding:16px 0;text-align:center}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <span class="logo">📡</span>
+    <div><span class="title">热点雷达</span><span class="subtitle">海外热点聚合 · 双击跳转原文</span></div>
+    <span class="spacer"></span>
+    <button class="btn-refresh" id="btnRefresh" onclick="refresh()">🔄 刷新热点</button>
+  </div>
+  <div class="status-bar">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <span class="status-text" id="status">就绪</span>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div class="content" id="content"></div>
+</div>
+
+<script>
+// ===== 配置 =====
+const CORS = 'https://corsproxy.io/?';  // CORS proxy for blocked APIs
+const KEYS = {
+  youtube:  'AIzaSyAFsEN9EiBrn9mZzmh3Yl1fMIdBCZMv8FM',
+  tmdb:     '9f842807e0c4919d22ad8903bbd210a4',
+  newsapi:  '3bd17c719f174ce797556f31ffe01f64',
+  trendmcp: 'tmcp_live_vj4mz9ctf815ne95yjnuwhstups8eh0c',
+  deepseek: 'sk-2b1544c282cd44709b2408745f77726c',
+};
+
+const CATS = [
+  {name:'🔥 热门Meme',  color:'#E0646E'},
+  {name:'🌟 娱乐新闻',  color:'#CB9842'},
+  {name:'🎬 电影资讯',  color:'#787CE6'},
+  {name:'🏈 体育热点',  color:'#44A87A'},
+  {name:'📹 视频热点',  color:'#D0659E'},
+  {name:'🌍 全球热帖',  color:'#5B8FDF'},
+  {name:'🔍 搜索趋势',  color:'#8B7CF6'},
+];
+
+let allData = {};
+let currentIdx = 0;
+
+// ===== 数据获取 =====
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function fetchReddit(sub, limit=15) {
+  const r=await fetchJSON(`https://www.reddit.com/r/${sub}/hot.json?limit=${limit}`);
+  return (r.data?.children||[]).filter(p=>!p.data.stickied).map(p=>{
+    const d=p.data;
+    return{id:'r_'+d.id,title:d.title,source:'r/'+d.subreddit,url:'https://reddit.com'+d.permalink,score:d.score||0};
+  });
+}
+
+async function fetchYouTube() {
+  const r=await fetchJSON(`https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&regionCode=US&maxResults=12&key=${KEYS.youtube}`);
+  return (r.items||[]).map(i=>({
+    id:'yt_'+i.id,title:i.snippet.title,source:i.snippet.channelTitle,
+    url:'https://youtube.com/watch?v='+i.id
+  }));
+}
+
+async function fetchTMDB() {
+  let all=[];
+  for(const ep of ['/movie/upcoming','/trending/movie/week']){
+    const r=await fetchJSON(`https://api.themoviedb.org/3${ep}?api_key=${KEYS.tmdb}&language=zh-CN`);
+    all.push(...(r.results||[]).slice(0,10).map(i=>({
+      id:'tmdb_'+i.id,title:i.title,source:'TMDB',
+      url:'https://www.themoviedb.org/movie/'+i.id,score:Math.round(i.vote_average*100)
+    })));
+  }
+  return all;
+}
+
+async function fetchNewsAPI() {
+  const qs=['entertainment+celebrity','sports+NFL+NBA'];
+  let all=[];
+  for(const q of qs){
+    const r=await fetchJSON(CORS+encodeURIComponent(`https://newsapi.org/v2/everything?q=${q}&language=en&sortBy=popularity&pageSize=10&apiKey=${KEYS.newsapi}`));
+    all.push(...(r.articles||[]).map(a=>({
+      id:'n_'+btoa(a.url).slice(0,12),title:a.title,source:a.source?.name||'News',
+      url:a.url
+    })));
+  }
+  return all;
+}
+
+const RSS = {
+  entertainment:[['Variety','https://variety.com/feed/'],['Deadline','https://deadline.com/feed/'],['THR','https://feeds.feedburner.com/thr/news'],['Billboard','https://www.billboard.com/feed/']],
+  sports:[['ESPN','https://www.espn.com/espn/rss/news'],['BBC Sport','https://feeds.bbci.co.uk/sport/rss.xml'],['Yahoo Sports','https://sports.yahoo.com/rss/']],
+};
+
+async function fetchRSS(cats=null) {
+  let all=[];
+  for(const [cat,feeds] of Object.entries(RSS)){
+    if(cats && !cats.includes(cat)) continue;
+    for(const [name,url] of feeds){
+      try{
+        const r=await fetch(CORS+encodeURIComponent(url));
+        const text=await r.text();
+        const parser=new DOMParser();
+        const xml=parser.parseFromString(text,'text/xml');
+        xml.querySelectorAll('item').forEach(item=>{
+          const t=item.querySelector('title')?.textContent;
+          const l=item.querySelector('link')?.textContent;
+          if(t) all.push({id:'rss_'+btoa(t).slice(0,12),title:t.trim(),source:name,url:l||''});
+        });
+      }catch(e){}
+    }
+  }
+  return all;
+}
+
+async function fetchTrendMCP(type,limit=20) {
+  const r=await fetch('https://api.trendsmcp.ai/api',{
+    method:'POST',headers:{'Authorization':'Bearer '+KEYS.trendmcp,'Content-Type':'application/json'},
+    body:JSON.stringify({mode:'top_trends',type,limit})
+  });
+  let d=await r.json();
+  if(d.body) d=JSON.parse(d.body);
+  return (d.data||[]).map(([rk,name])=>({
+    id:'tm_'+btoa(name).slice(0,12),title:name,source:type,
+    url:'https://trends.google.com/trends/explore?q='+encodeURIComponent(name),score:rk
+  }));
+}
+
+async function translateText(text) {
+  const r=await fetch('https://api.deepseek.com/v1/chat/completions',{
+    method:'POST',headers:{'Authorization':'Bearer '+KEYS.deepseek,'Content-Type':'application/json'},
+    body:JSON.stringify({model:'deepseek-chat',messages:[
+      {role:'system',content:'翻译为中文，只输出译文，不要解释。'},
+      {role:'user',content:text}
+    ],temperature:0.3,max_tokens:100})
+  });
+  const d=await r.json();
+  return d.choices?.[0]?.message?.content?.trim()||'⚠️ 翻译失败';
+}
+
+// ===== 刷新 =====
+async function refresh() {
+  const btn=document.getElementById('btnRefresh');
+  const prog=document.getElementById('progress');
+  const stat=document.getElementById('status');
+  btn.disabled=true;btn.textContent='⏳ 获取中…';
+  prog.style.width='30%';stat.textContent='正在拉取海外热点…';
+
+  const tasks = [
+    ['🔥 热门Meme', ()=>fetchReddit('memes+dankmemes+funny',15)],
+    ['🌟 娱乐新闻', async()=>[...await fetchNewsAPI(),...await fetchRSS(['entertainment'])]],
+    ['🎬 电影资讯', ()=>fetchTMDB()],
+    ['🏈 体育热点', ()=>fetchRSS(['sports'])],
+    ['📹 视频热点', ()=>fetchYouTube()],
+    ['🌍 全球热帖', ()=>fetchReddit('worldnews+news+all',10)],
+    ['🔍 搜索趋势', ()=>fetchTrendMCP('Google Trends',20)],
+  ];
+
+  for(let i=0;i<tasks.length;i++) {
+    const [cat,fn]=tasks[i];
+    prog.style.width=(30+(i/tasks.length)*70)+'%';
+    stat.textContent='⏳ 获取 '+cat+'…';
+    try{ allData[cat]=await fn(); }catch(e){ allData[cat]=[]; }
+    renderPanel(i);
+  }
+  prog.style.width='100%';stat.textContent='✅ 热点更新完成';
+  setTimeout(()=>prog.style.width='0%',2000);
+  btn.disabled=false;btn.textContent='🔄 刷新热点';
+}
+
+// ===== UI =====
+function initUI(){
+  const tabsEl=document.getElementById('tabs');
+  const contentEl=document.getElementById('content');
+  CATS.forEach((cat,i)=>{
+    const b=document.createElement('button');b.className='tab';b.textContent=cat.name;
+    b.style.setProperty('--tab-color',cat.color);b.onclick=()=>switchTab(i);
+    tabsEl.appendChild(b);
+    const p=document.createElement('div');p.className='panel';p.id='panel-'+i;
+    p.style.setProperty('--cat-color',cat.color);p.style.setProperty('--cat-color-bg',cat.color+'10');
+    contentEl.appendChild(p);
+  });
+  switchTab(0);
+}
+
+function switchTab(i){currentIdx=i;
+  document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',j===i));
+  document.querySelectorAll('.panel').forEach((p,j)=>p.classList.toggle('active',j===i));
+}
+
+function renderPanel(i){
+  const cat=CATS[i];const items=allData[cat.name]||[];const shown=items.slice(0,20);
+  const p=document.getElementById('panel-'+i);if(!p)return;
+  let h='';
+  h+=`<div class="list-header"><span class="h-rank">#</span><span class="h-trans"></span><span class="h-bar"></span><span class="h-title">标题 / 来源</span><span class="h-actions"><button class="btn-translate-all" id="btnAll-${i}" ${shown.length?'':'disabled'} onclick="translateAll(${i})">全部翻译</button><span class="count">${shown.length?shown.length+'条':'暂无数据'}</span></span></div>`;
+  h+='<div class="divider"></div><div class="item-list">';
+  if(!shown.length) h+='<div class="hint">暂无数据</div>';
+  else shown.forEach((it,n)=>{
+    const rk=String(n+1).padStart(2,'0');
+    const src=it.source||'';
+    const heat=it.score?(it.score>=1000?(it.score/1000).toFixed(1)+'k':it.score):'';
+    h+=`<div class="item" data-url="${it.url||''}" ondblclick="openLink(this)">
+      <span class="i-rank">${rk}</span>
+      <button class="i-trans" onclick="event.stopPropagation();translateOne(this,${i},${n})" title="翻译">译</button>
+      <span class="i-bar"></span>
+      <span class="i-title" data-org="${it.title.replace(/"/g,'&quot;')}">${it.title}</span>
+      ${src?`<span class="i-source">${src}</span>`:''}
+      ${heat?`<span class="i-heat">⬆ ${heat}</span>`:''}
+    </div>`;
+  });
+  h+='</div>';p.innerHTML=h;
+}
+
+function openLink(el){ const u=el.dataset.url; if(u) window.open(u,'_blank'); }
+
+async function translateOne(btn,catIdx,itemIdx){
+  const item=allData[CATS[catIdx].name]?.[itemIdx];if(!item)return;
+  const titleEl=btn.parentElement.querySelector('.i-title');
+  const org=titleEl.dataset.org;
+  if(btn.classList.contains('done')){
+    titleEl.textContent=org;titleEl.classList.remove('translated');
+    btn.textContent='译';btn.classList.remove('done');return;
+  }
+  btn.disabled=true;btn.textContent='⏳';
+  try{const r=await translateText(org);titleEl.textContent=r;titleEl.classList.add('translated');btn.classList.add('done');btn.textContent='↩';}
+  catch(e){titleEl.textContent='⚠️ 失败';btn.textContent='译';}
+  btn.disabled=false;
+}
+
+async function translateAll(catIdx){
+  const items=allData[CATS[catIdx].name]||[];
+  const p=document.getElementById('panel-'+catIdx);
+  const btnAll=p.querySelector('.btn-translate-all');btnAll.disabled=true;
+  const titles=p.querySelectorAll('.i-title');
+  const btns=p.querySelectorAll('.i-trans');
+  let done=0,total=titles.length;
+  for(let i=0;i<total;i++){
+    if(btns[i].classList.contains('done')){done++;continue;}
+    btnAll.textContent=done+'/'+total;btns[i].disabled=true;btns[i].textContent='⏳';
+    try{const r=await translateText(titles[i].dataset.org);titles[i].textContent=r;titles[i].classList.add('translated');btns[i].classList.add('done');btns[i].textContent='↩';}
+    catch(e){btns[i].textContent='⚠️';}
+    btns[i].disabled=false;done++;btnAll.textContent=done+'/'+total;
+  }
+  btnAll.textContent='✓ 已翻译';
+}
+
+// Start
+initUI();
+setTimeout(refresh,300);
+</script>
+</body>
+</html>

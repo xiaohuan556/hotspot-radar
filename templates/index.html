@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>热点雷达</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Microsoft YaHei', 'Segoe UI', sans-serif; background:#F8FAFC; color:#1E293B; }
+  .app { max-width:1100px; margin:0 auto; padding:24px 32px; }
+
+  /* 顶栏 */
+  .header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+  .logo { font-size:28px; }
+  .title { font-size:22px; font-weight:800; color:#0F172A; }
+  .subtitle { font-size:12px; color:#94A3B8; margin-left:4px; }
+  .spacer { flex:1; }
+  .btn-refresh { background:#3B82F6; color:#fff; border:none; border-radius:10px; font-size:13px; font-weight:600; padding:10px 22px; cursor:pointer; }
+  .btn-refresh:hover { background:#2563EB; }
+  .btn-refresh:disabled { background:#CBD5E1; color:#94A3B8; cursor:not-allowed; }
+
+  /* 进度 & 状态 */
+  .status-bar { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .progress-bar { flex:1; height:3px; background:#E2E8F0; border-radius:2px; overflow:hidden; }
+  .progress-fill { height:100%; background:#3B82F6; border-radius:2px; width:0%; transition:width 0.3s; }
+  .status-text { font-size:11px; color:#94A3B8; white-space:nowrap; }
+
+  /* Tab */
+  .tabs { display:flex; gap:0; margin-bottom:0; border-bottom:2px solid #F1F5F9; }
+  .tab { padding:10px 18px; font-size:13px; font-weight:500; color:#64748B; background:none; border:none; border-bottom:3px solid transparent; cursor:pointer; white-space:nowrap; }
+  .tab:hover { color:var(--tab-color); }
+  .tab.active { color:var(--tab-color); border-bottom-color:var(--tab-color); font-weight:600; }
+
+  /* 内容 */
+  .content { padding-top:16px; }
+  .panel { display:none; }
+  .panel.active { display:block; }
+
+  /* 摘要 */
+  .summary { background:#F8FAFC; border:1px solid #E8ECF1; border-left:4px solid var(--cat-color); border-radius:12px; padding:12px 16px; margin-bottom:12px; font-size:12px; color:#475569; }
+  .summary:empty { display:none; }
+
+  /* 表头 */
+  .list-header { display:flex; align-items:center; gap:8px; padding:0 0 8px 0; font-size:10px; font-weight:600; color:#94A3B8; }
+  .list-header .h-rank { width:24px; text-align:center; }
+  .list-header .h-trans { width:26px; }
+  .list-header .h-bar { width:4px; }
+  .list-header .h-title { flex:1; }
+  .list-header .h-actions { display:flex; align-items:center; gap:8px; }
+
+  .btn-translate-all { font-size:10px; padding:3px 10px; border-radius:6px; border:1px solid var(--cat-color); color:var(--cat-color); background:transparent; cursor:pointer; white-space:nowrap; }
+  .btn-translate-all:hover { background:var(--cat-color-bg); }
+  .btn-translate-all:disabled { color:#C0C8D4; border-color:#E2E8F0; cursor:not-allowed; }
+  .count { font-size:10px; color:#94A3B8; white-space:nowrap; }
+
+  .divider { height:1px; background:#F1F5F9; margin-bottom:10px; }
+
+  /* 热点条目 */
+  .item-list { display:flex; flex-direction:column; gap:6px; }
+  .item { display:flex; align-items:center; gap:8px; padding:9px 12px; background:#fff; border:1px solid #E8ECF1; border-radius:10px; cursor:pointer; transition:all 0.15s; }
+  .item:hover { background:#F0F6FF; border-color:#BFDBFE; }
+
+  .i-rank { width:24px; text-align:center; font-size:11px; font-weight:700; color:var(--cat-color); }
+  .i-trans { width:26px; height:26px; border-radius:5px; border:1px solid var(--cat-color); border-color:color-mix(in srgb, var(--cat-color) 30%, transparent); color:var(--cat-color); background:transparent; font-size:10px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .i-trans:hover { background:color-mix(in srgb, var(--cat-color) 12%, transparent); border-color:color-mix(in srgb, var(--cat-color) 60%, transparent); }
+  .i-trans:disabled { opacity:0.5; cursor:not-allowed; }
+  .i-trans.done { background:color-mix(in srgb, var(--cat-color) 15%, transparent); }
+
+  .i-bar { width:4px; height:26px; border-radius:2px; background:var(--cat-color); flex-shrink:0; }
+  .i-title { flex:1; font-size:13px; color:#1E293B; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .i-title.translated { color:var(--cat-color); font-weight:500; }
+  .i-source { font-size:10px; color:#475569; background:#F1F5F9; border:1px solid #E2E8F0; border-radius:3px; padding:1px 6px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .i-heat { font-size:10px; color:#94A3B8; min-width:46px; text-align:right; }
+
+  .hint { color:#94A3B8; font-size:11px; padding:16px 0; text-align:center; }
+
+  @media (max-width:700px) {
+    .app { padding:12px; }
+    .tabs { overflow-x:auto; }
+    .item { flex-wrap:wrap; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- 顶栏 -->
+  <div class="header">
+    <span class="logo">📡</span>
+    <div>
+      <span class="title">热点雷达</span>
+      <span class="subtitle">海外热点聚合 · 双击跳转原文 · 全平台兼容</span>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn-refresh" id="btnRefresh" onclick="refresh()">🔄 刷新热点</button>
+  </div>
+
+  <!-- 进度条 -->
+  <div class="status-bar">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <span class="status-text" id="status">就绪</span>
+  </div>
+
+  <!-- Tab -->
+  <div class="tabs" id="tabs"></div>
+
+  <!-- 内容 -->
+  <div class="content" id="content"></div>
+</div>
+
+<script>
+{% autoescape false %}
+const CAT_KEYS = {{ cat_keys_json }};
+const CAT_COLORS = {{ cat_colors_json }};
+{% endautoescape %}
+
+let allItems = {};  // cat -> items[]
+let currentTab = CAT_KEYS[0];
+
+function initUI() {
+  // Tabs
+  const tabsEl = document.getElementById('tabs');
+  CAT_KEYS.forEach(cat => {
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.textContent = cat;
+    btn.style.setProperty('--tab-color', CAT_COLORS[cat]);
+    btn.onclick = () => switchTab(cat);
+    tabsEl.appendChild(btn);
+  });
+
+  // Panels
+  const contentEl = document.getElementById('content');
+  CAT_KEYS.forEach(cat => {
+    const div = document.createElement('div');
+    div.className = 'panel';
+    div.id = 'panel-' + CAT_KEYS.indexOf(cat);
+    div.style.setProperty('--cat-color', CAT_COLORS[cat]);
+    div.style.setProperty('--cat-color-bg', CAT_COLORS[cat] + '10');
+    contentEl.appendChild(div);
+  });
+
+  switchTab(currentTab);
+}
+
+function switchTab(cat) {
+  currentTab = cat;
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', CAT_KEYS[i] === cat);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const panel = document.getElementById('panel-' + CAT_KEYS.indexOf(cat));
+  if (panel) panel.classList.add('active');
+}
+
+function renderPanel(cat, items) {
+  const color = CAT_COLORS[cat];
+  const panel = document.getElementById('panel-' + CAT_KEYS.indexOf(cat));
+  if (!panel) return;
+
+  const shown = items.slice(0, 20);
+  let html = '';
+
+  // 表头
+  html += `<div class="list-header">
+    <span class="h-rank">#</span>
+    <span class="h-trans"></span>
+    <span class="h-bar"></span>
+    <span class="h-title">标题 / 来源</span>
+    <span class="h-actions">
+      <button class="btn-translate-all" data-cat="${cat}" onclick="translateAll('${cat.replace(/'/g,"\\'")}')" ${shown.length===0?'disabled':''}>全部翻译</button>
+      <span class="count">${shown.length === 0 ? '暂无数据' : shown.length + '条'}</span>
+    </span>
+  </div>`;
+
+  html += '<div class="divider"></div>';
+  html += '<div class="item-list">';
+
+  if (shown.length === 0) {
+    html += '<div class="hint">暂无数据</div>';
+  } else {
+    shown.forEach((item, i) => {
+      const rank = String(i + 1).padStart(2, '0');
+      const src = item.source || '';
+      const heat = item.score ? (item.score >= 1000 ? (item.score/1000).toFixed(1)+'k' : item.score) : '';
+      html += `
+      <div class="item" data-url="${item.url||''}" ondblclick="openLink(this)" data-cat="${cat}" data-idx="${i}">
+        <span class="i-rank">${rank}</span>
+        <button class="i-trans" data-cat="${cat}" data-idx="${i}" onclick="event.stopPropagation(); translateOne(this)" title="翻译">译</button>
+        <span class="i-bar"></span>
+        <span class="i-title" data-original="${item.title.replace(/"/g,'&quot;')}">${item.title}</span>
+        ${src ? `<span class="i-source" title="${src}">${src}</span>` : ''}
+        ${heat ? `<span class="i-heat">⬆ ${heat}</span>` : ''}
+      </div>`;
+    });
+  }
+  html += '</div>';
+  panel.innerHTML = html;
+}
+
+function openLink(el) {
+  const url = el.dataset.url;
+  if (url) window.open(url, '_blank');
+}
+
+async function refresh() {
+  const btn = document.getElementById('btnRefresh');
+  const progress = document.getElementById('progress');
+  const status = document.getElementById('status');
+  btn.disabled = true; btn.textContent = '⏳ 获取中…';
+  progress.style.width = '30%';
+  status.textContent = '正在拉取海外热点…';
+
+  try {
+    const resp = await fetch('/api/refresh');
+    const data = await resp.json();
+    allItems = data;
+    CAT_KEYS.forEach(cat => {
+      renderPanel(cat, data[cat] || []);
+    });
+    progress.style.width = '100%';
+    status.textContent = '✅ 热点更新完成';
+    setTimeout(() => { progress.style.width = '0%'; }, 2000);
+  } catch (e) {
+    status.textContent = '❌ 获取失败: ' + e.message;
+    progress.style.width = '0%';
+  }
+  btn.disabled = false; btn.textContent = '🔄 刷新热点';
+}
+
+async function translateOne(btn) {
+  const cat = btn.dataset.cat;
+  const idx = parseInt(btn.dataset.idx);
+  const item = allItems[cat]?.[idx];
+  if (!item) return;
+
+  const titleEl = btn.parentElement.querySelector('.i-title');
+  const original = titleEl.dataset.original;
+
+  // If already translated, revert
+  if (btn.classList.contains('done')) {
+    titleEl.textContent = original;
+    titleEl.classList.remove('translated');
+    btn.textContent = '译';
+    btn.classList.remove('done');
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const resp = await fetch('/api/translate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({text: original})
+    });
+    const data = await resp.json();
+    titleEl.textContent = data.translated;
+    titleEl.classList.add('translated');
+    btn.classList.add('done');
+    btn.textContent = '↩';
+  } catch (e) {
+    titleEl.textContent = '⚠️ 翻译失败';
+    btn.textContent = '译';
+  }
+  btn.disabled = false;
+}
+
+async function translateAll(cat) {
+  const items = allItems[cat] || [];
+  const panel = document.getElementById('panel-' + CAT_KEYS.indexOf(cat));
+  const translateAllBtn = panel.querySelector('.btn-translate-all');
+  translateAllBtn.disabled = true;
+
+  const titleEls = panel.querySelectorAll('.i-title');
+  const transBtns = panel.querySelectorAll('.i-trans');
+  let done = 0;
+  const total = titleEls.length;
+
+  for (let i = 0; i < total; i++) {
+    if (transBtns[i].classList.contains('done')) {
+      done++;
+      continue;
+    }
+    translateAllBtn.textContent = `${done}/${total}`;
+    transBtns[i].disabled = true; transBtns[i].textContent = '⏳';
+    try {
+      const resp = await fetch('/api/translate', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({text: titleEls[i].dataset.original})
+      });
+      const data = await resp.json();
+      titleEls[i].textContent = data.translated;
+      titleEls[i].classList.add('translated');
+      transBtns[i].classList.add('done');
+      transBtns[i].textContent = '↩';
+    } catch (e) {
+      transBtns[i].textContent = '⚠️';
+    }
+    transBtns[i].disabled = false;
+    done++;
+    translateAllBtn.textContent = `${done}/${total}`;
+  }
+  translateAllBtn.textContent = '✓ 已翻译';
+}
+
+// Init
+initUI();
+setTimeout(refresh, 400);
+</script>
+</body>
+</html>
