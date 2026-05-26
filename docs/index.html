@@ -189,6 +189,17 @@ async function fetchTrendMCP(type,limit=20) {
   }catch(e){ return []; }
 }
 
+async function fetchTikTok(limit=20) {
+  try{
+    const r=await fetch(CORS+encodeURIComponent('https://www.tikwm.com/api/feed/list?region=US&count='+limit));
+    const d=await r.json();
+    return (d.data||[]).map(v=>({
+      id:'tt_'+v.video_id,title:v.title||'(无标题)',source:'TikTok',
+      url:'https://www.tiktok.com/@/video/'+v.video_id,score:v.play_count||0
+    }));
+  }catch(e){ return []; }
+}
+
 async function translateText(text) {
   const r=await fetch('https://api.deepseek.com/v1/chat/completions',{
     method:'POST',headers:{'Authorization':'Bearer '+KEYS.deepseek,'Content-Type':'application/json'},
@@ -217,7 +228,7 @@ async function refresh() {
     ['📹 视频热点', ()=>fetchYouTube()],
     ['🌍 全球热帖', ()=>fetchReddit('worldnews+news+all',10)],
     ['🔍 搜索趋势', ()=>fetchTrendMCP('Google Trends',20)],
-    ['🎵 TT热梗',   ()=>fetchReddit('TikTokCringe+tiktok+TikTokmemes+TikTokTrends',15)],
+    ['🎵 TT热梗',   ()=>fetchTikTok(20)],
   ];
 
   for(let i=0;i<tasks.length;i++) {
