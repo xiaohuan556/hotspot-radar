@@ -95,16 +95,36 @@ let currentIdx = 0;
 
 // ===== 数据获取 =====
 async function fetchJSON(url) {
-  const r = await fetch(url);
+  const r = await fetch(CORS + encodeURIComponent(url));
   return r.json();
 }
 
 async function fetchReddit(sub, limit=15) {
-  const r=await fetchJSON(`https://www.reddit.com/r/${sub}/hot.json?limit=${limit}`);
-  return (r.data?.children||[]).filter(p=>!p.data.stickied).map(p=>{
-    const d=p.data;
-    return{id:'r_'+d.id,title:d.title,source:'r/'+d.subreddit,url:'https://reddit.com'+d.permalink,score:d.score||0};
-  });
+  try {
+    const r = await fetchJSON(`https://www.reddit.com/r/${sub}/hot.json?limit=${limit}`);
+    return (r.data?.children||[]).filter(p=>!p.data.stickied).map(p=>{
+      const d=p.data;
+      return{id:'r_'+d.id,title:d.title,source:'r/'+d.subreddit,url:'https://reddit.com'+d.permalink,score:d.score||0};
+    });
+  } catch(e) { return []; }
+}
+
+async function fetchMemeKYM(limit=15) {
+  try {
+    const url = CORS + encodeURIComponent('https://knowyourmeme.com/memes');
+    const r = await fetch(url);
+    const text = await r.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'text/html');
+    const items = [];
+    doc.querySelectorAll('a[href*="/memes/"]').forEach(a => {
+      const t = a.textContent.trim();
+      if(t && t.length > 3 && !t.startsWith('http') && items.length < limit) {
+        items.push({id:'kym_'+btoa(t).slice(0,10), title:t, source:'KnowYourMeme', url:'https://knowyourmeme.com'+a.getAttribute('href')});
+      }
+    });
+    return items;
+  } catch(e) { return []; }
 }
 
 async function fetchYouTube() {
@@ -207,7 +227,7 @@ async function refresh() {
   prog.style.width='30%';stat.textContent='正在拉取海外热点…';
 
   const tasks = [
-    ['🔥 热门Meme', ()=>fetchReddit('memes+dankmemes+funny',15)],
+    ['🔥 热门Meme', async()=>{ const r=await fetchMemeKYM(15); return r.length?r:await fetchReddit('memes+dankmemes+funny',15); }],
     ['🌟 娱乐新闻', async()=>[...await fetchNewsAPI(),...await fetchRSS(['entertainment'])]],
     ['🎬 电影资讯', ()=>fetchTMDB()],
     ['🏈 体育热点', ()=>fetchRSS(['sports'])],
