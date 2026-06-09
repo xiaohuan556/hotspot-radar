@@ -6,3 +6,5 @@ __pycache__/
 *.spec
 dist/
 build/
+.workbuddy/
+meme_cache.json

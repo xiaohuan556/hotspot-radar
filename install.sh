@@ -18,21 +18,30 @@ fi
 
 # 安装依赖
 echo ">>> 安装 Python 依赖..."
-python3 -m pip install PyQt6 openai
+python3 -m pip install PyQt6 openai flask
 
-# 复制 .env 配置（如果存在）
+# 设置 .env 配置
 if [ ! -f .env ]; then
-    echo "# 热点雷达 API 配置" > .env
-    echo 'OPENAI_API_KEY="sk-2b1544c282cd44709b2408745f77726c"' >> .env
-    echo 'OPENAI_BASE_URL="https://api.deepseek.com/v1"' >> .env
-    echo 'LLM_MODEL="deepseek-chat"' >> .env
-    echo 'YOUTUBE_API_KEY="AIzaSyAFsEN9EiBrn9mZzmh3Yl1fMIdBCZMv8FM"' >> .env
-    echo 'TMDB_API_KEY="9f842807e0c4919d22ad8903bbd210a4"' >> .env
-    echo 'NEWSAPI_KEY="3bd17c719f174ce797556f31ffe01f64"' >> .env
-    echo 'TRENDMCP_KEY="tmcp_live_vj4mz9ctf815ne95yjnuwhstups8eh0c"' >> .env
+    echo ""
+    echo ">>> 请配置 API Key（在 .env 文件中填写）："
+    cat > .env << 'EOF'
+# 热点雷达 API 配置
+# 请替换以下占位符为你的真实 API Key
+
+OPENAI_API_KEY="sk-your-deepseek-api-key"
+OPENAI_BASE_URL="https://api.deepseek.com/v1"
+LLM_MODEL="deepseek-chat"
+
+# 以下为可选配置（不填则对应功能不可用）
+YOUTUBE_API_KEY=""
+TMDB_API_KEY=""
+NEWSAPI_KEY=""
+EOF
+    echo "   .env 已创建，请编辑填写 API Key 后重新启动"
 fi
 
 echo ""
-echo "✅ 安装完成！运行："
-echo "   python3 main.py"
+echo "✅ 安装完成！"
+echo "   Web版：python3 app.py"
+echo "   桌面版：python3 main.py"
 echo ""

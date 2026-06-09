@@ -35,9 +35,7 @@ CAT_COLORS = {
     "🎬 电影资讯": "#787CE6",
     "🏈 体育热点": "#44A87A",
     "📹 视频热点": "#D0659E",
-    "🌍 全球热帖": "#5B8FDF",
     "🔍 搜索趋势": "#8B7CF6",
-    "🎵 TT热梗":  "#EE6DB4",
 }
 CAT_KEYS = list(CAT_COLORS.keys())
 
@@ -54,7 +52,11 @@ def fetch_reddit(subreddits=None, limit=15):
             "worldnews": "worldnews+news",
         }
     results = []
-    headers = {"User-Agent": "HotRadar/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     for category, subs in subreddits.items():
         try:
             url = f"https://www.reddit.com/r/{subs}/hot.json?limit={limit}"
@@ -75,6 +77,141 @@ def fetch_reddit(subreddits=None, limit=15):
         except Exception as e:
             print(f"[Reddit] {category}: {e}")
     return results
+
+def fetch_meme_fallback(limit=15):
+    """Reddit 被拦截时的 Meme 备用源：抓取 Know Your Meme /memes 最新条目"""
+    results = []
+    try:
+        req = Request("https://knowyourmeme.com/memes", headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        with urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        import re
+        # 匹配 entry grid 中的 <a> 块
+        pattern = re.compile(
+            r'<a[^>]+href="(/memes/[^"]+)"[^>]*>(.*?)</a>',
+            re.S
+        )
+        seen = set()
+        for match in pattern.finditer(html):
+            href, block = match.group(1), match.group(2)
+            # 跳过分页链接
+            if "page/" in href:
+                continue
+            # 找图片
+            img_match = re.search(r'<img[^>]+src="([^"]+)"', block)
+            img = img_match.group(1) if img_match else ""
+            # 优先从 h3.title 提取标题，回退到 span
+            h3_match = re.search(r'<h3[^>]+class="title"[^>]*>([^<]+)</h3>', block)
+            if h3_match:
+                title = h3_match.group(1).strip()
+            else:
+                span_match = re.search(r'<span[^>]*>([^<]+)</span>', block)
+                title = span_match.group(1).strip() if span_match else ""
+            if not title or title in seen or len(title) < 3:
+                continue
+            # 过滤分类标签
+            if title.lower() in ("meme", "subculture", "event", "entry", "photo", "video", "image"):
+                continue
+            seen.add(title)
+            url = f"https://knowyourmeme.com{href}"
+            img_url = img if img.startswith("http") else f"https:{img}" if img.startswith("//") else img
+            results.append(dict(
+                id=f"kym_{hashlib.md5(title.encode()).hexdigest()[:12]}",
+                title=title,
+                source="Know Your Meme", category="memes",
+                url=url,
+                score=0, comments=0,
+                desc=title[:200],
+                image=img_url,
+            ))
+            if len(results) >= limit:
+                break
+        if results:
+            return results
+    except Exception as e:
+        print(f"[MemeFallback KYM]: {e}")
+
+    # 降级到 Google News
+    try:
+        rss_url = "https://news.google.com/rss/search?q=viral+meme+funny+trending&hl=en-US&gl=US&ceid=US:en"
+        req = Request(rss_url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        with urlopen(req, timeout=10) as resp:
+            content = resp.read().decode("utf-8", errors="replace")
+        root = ET.fromstring(content)
+        for i, item in enumerate(root.iter("item")):
+            if i >= limit: break
+            title = item.find("title")
+            link = item.find("link")
+            if title is None or not title.text: continue
+            title_text = title.text.strip()
+            if not any(k in title_text.lower() for k in ["meme", "viral", "tiktok", "funny", "trend", "internet"]):
+                continue
+            results.append(dict(
+                id=f"meme_{hashlib.md5(title_text.encode()).hexdigest()[:12]}",
+                title=title_text,
+                source="Google News", category="memes",
+                url=link.text.strip() if link is not None else "",
+                score=0, comments=0,
+                desc=title_text[:200],
+            ))
+        if results:
+            return results
+    except Exception as e:
+        print(f"[MemeFallback GoogleNews]: {e}")
+
+    return [dict(
+        id="meme_notice", title="⚠️ Meme 数据源暂时不可用",
+        source="系统提示", category="memes",
+        url="", score=0, comments=0,
+        desc="Reddit 和 Know Your Meme 均无法访问，请稍后再试。",
+    )]
+
+def fetch_google_trends(limit=20):
+    """抓取 Google Trends RSS (Daily Search Trends)"""
+    results = []
+    ns = {"ht": "https://trends.google.com/trending/rss"}
+    try:
+        req = Request("https://trends.google.com/trending/rss?geo=US", headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        with urlopen(req, timeout=10) as resp:
+            content = resp.read().decode("utf-8", errors="replace")
+        root = ET.fromstring(content)
+        for i, item in enumerate(root.findall(".//item")):
+            if i >= limit:
+                break
+            title_el = item.find("title")
+            traffic_el = item.find("ht:approx_traffic", ns)
+            title = title_el.text.strip() if title_el is not None and title_el.text else ""
+            traffic = traffic_el.text.strip() if traffic_el is not None and traffic_el.text else ""
+            # 提取第一条新闻作为描述
+            news_el = item.find("ht:news_item", ns)
+            news_title = ""
+            news_url = ""
+            if news_el is not None:
+                nt = news_el.find("ht:news_item_title", ns)
+                nu = news_el.find("ht:news_item_url", ns)
+                news_title = nt.text.strip() if nt is not None and nt.text else ""
+                news_url = nu.text.strip() if nu is not None and nu.text else ""
+            search_url = f"https://trends.google.com/trends/explore?q={quote(title)}"
+            results.append(dict(
+                id=f"trend_{hashlib.md5(title.encode()).hexdigest()[:12]}",
+                title=title,
+                source="Google Trends",
+                category="trend",
+                url=news_url or search_url,
+                score=0,
+                comments=0,
+                desc=news_title or f"搜索量: {traffic}",
+            ))
+        return results
+    except Exception as e:
+        print(f"[GoogleTrends]: {e}")
+        return []
 
 def fetch_youtube(max_results=12):
     if not YOUTUBE_KEY: return []
@@ -289,19 +426,50 @@ def index():
         cat_keys_json=json.dumps(CAT_KEYS, ensure_ascii=False),
         cat_colors_json=json.dumps(CAT_COLORS, ensure_ascii=False))
 
+def load_meme_cache():
+    """加载本地缓存的 meme 数据（保底）"""
+    cache_file = PROJECT / "meme_cache.json"
+    if cache_file.exists():
+        try:
+            with open(cache_file, encoding="utf-8") as f:
+                cache = json.load(f)
+            return cache.get("memes", [])
+        except Exception as e:
+            print(f"[MemeCache] load error: {e}")
+    return []
+
+
+def fetch_memes():
+    """实时抓取 KYM 最新 meme，失败时降级"""
+    items = fetch_meme_fallback()
+    if items:
+        # 成功后保存缓存
+        cache_file = PROJECT / "meme_cache.json"
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump({"memes": items, "source": "Know Your Meme"}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return items
+    # KYM 失败 → 尝试 Reddit
+    reddit = fetch_reddit({"memes": "memes+dankmemes+funny"})
+    if reddit:
+        return reddit
+    # 全挂 → 缓存兜底
+    return load_meme_cache()
+
+
 @app.route("/api/refresh")
 def api_refresh():
     """获取所有分类的热点数据"""
     results = {}
     sections = [
-        ("🔥 热门Meme", lambda: fetch_reddit({"memes": "memes+dankmemes+funny"})),
+        ("🔥 热门Meme", fetch_memes),
         ("🌟 娱乐新闻", lambda: fetch_newsapi() + fetch_rss(categories=["entertainment"])),
         ("🎬 电影资讯", fetch_tmdb),
         ("🏈 体育热点", lambda: fetch_rss(categories=["sports"])),
         ("📹 视频热点", fetch_youtube),
-        ("🌍 全球热帖", lambda: fetch_reddit({"worldnews": "worldnews+news+all"}, 10)),
-        ("🔍 搜索趋势", lambda: fetch_trendmcp("Google Trends", 20)),
-        ("🎵 TT热梗", lambda: fetch_reddit({"tiktok": "TikTokCringe+tiktok+TikTokmemes"}, 15)),
+        ("🔍 搜索趋势", lambda: fetch_google_trends(20)),
     ]
     for name, func in sections:
         try:

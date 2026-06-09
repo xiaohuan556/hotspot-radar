@@ -87,9 +87,7 @@ const CATS = [
   {name:'🎬 电影资讯',  color:'#787CE6'},
   {name:'🏈 体育热点',  color:'#44A87A'},
   {name:'📹 视频热点',  color:'#D0659E'},
-  {name:'🌍 全球热帖',  color:'#5B8FDF'},
   {name:'🔍 搜索趋势',  color:'#8B7CF6'},
-  {name:'🎵 TT热梗',   color:'#EE6DB4'},
 ];
 
 let allData = {};
@@ -169,8 +167,7 @@ async function fetchRSS(cats=null) {
 }
 
 async function fetchTrendMCP(type,limit=20) {
-  // Google Trends RSS — 公开免费，无需 API Key
-  const url = CORS+encodeURIComponent('https://trends.google.com/trends/trendingsearches/daily/rss?geo=US');
+  const url = CORS+encodeURIComponent('https://trends.google.com/trending/rss?geo=US');
   try{
     const r=await fetch(url);
     const text=await r.text();
@@ -186,17 +183,6 @@ async function fetchTrendMCP(type,limit=20) {
       });
     });
     return items;
-  }catch(e){ return []; }
-}
-
-async function fetchTikTok(limit=20) {
-  try{
-    const r=await fetch(CORS+encodeURIComponent('https://www.tikwm.com/api/feed/list?region=US&count='+limit));
-    const d=await r.json();
-    return (d.data||[]).map(v=>({
-      id:'tt_'+v.video_id,title:v.title||'(无标题)',source:'TikTok',
-      url:'https://www.tiktok.com/@/video/'+v.video_id,score:v.play_count||0
-    }));
   }catch(e){ return []; }
 }
 
@@ -226,9 +212,7 @@ async function refresh() {
     ['🎬 电影资讯', ()=>fetchTMDB()],
     ['🏈 体育热点', ()=>fetchRSS(['sports'])],
     ['📹 视频热点', ()=>fetchYouTube()],
-    ['🌍 全球热帖', ()=>fetchReddit('worldnews+news+all',10)],
     ['🔍 搜索趋势', ()=>fetchTrendMCP('Google Trends',20)],
-    ['🎵 TT热梗',   ()=>fetchTikTok(20)],
   ];
 
   for(let i=0;i<tasks.length;i++) {
