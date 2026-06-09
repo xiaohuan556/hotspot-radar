@@ -110,21 +110,76 @@ async function fetchReddit(sub, limit=15) {
 }
 
 async function fetchMemeKYM(limit=15) {
+  // 与桌面端 app.py fetch_meme_fallback() 完全一致的逻辑
   try {
     const url = CORS + encodeURIComponent('https://knowyourmeme.com/memes');
     const r = await fetch(url);
     const text = await r.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(text, 'text/html');
     const items = [];
-    doc.querySelectorAll('a[href*="/memes/"]').forEach(a => {
-      const t = a.textContent.trim();
-      if(t && t.length > 3 && !t.startsWith('http') && items.length < limit) {
-        items.push({id:'kym_'+btoa(t).slice(0,10), title:t, source:'KnowYourMeme', url:'https://knowyourmeme.com'+a.getAttribute('href')});
+    const seen = new Set();
+
+    // 正则匹配：<a href="/memes/...">块，与桌面端正则对齐
+    const pattern = /<a[^>]+href="(\/memes\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while((m = pattern.exec(text)) !== null && items.length < limit) {
+      const href = m[1];
+      const block = m[2];
+      if(href.includes('page/')) continue; // 跳过分页
+
+      // 优先从 h3.title 提取标题，回退到 span
+      let title = '';
+      const h3m = block.match(/<h3[^>]+class="title"[^>]*>([^<]+)<\/h3>/i);
+      if(h3m) {
+        title = h3m[1].trim();
+      } else {
+        const spm = block.match(/<span[^>]*>([^<]+)<\/span>/i);
+        if(spm) title = spm[1].trim();
+      }
+
+      if(!title || seen.has(title) || title.length < 3) continue;
+      const junk = ['meme','subculture','event','entry','photo','video','image'];
+      if(junk.includes(title.toLowerCase())) continue;
+      seen.add(title);
+
+      // 提取图片
+      const imgm = block.match(/<img[^>]+src="([^"]+)"/i);
+      const img = imgm ? (imgm[1].startsWith('//') ? 'https:'+imgm[1] : imgm[1]) : '';
+
+      items.push({
+        id:'kym_'+btoa(title).slice(0,12),
+        title: title,
+        source:'Know Your Meme',
+        url:'https://knowyourmeme.com'+href
+      });
+    }
+    if(items.length > 0) return items;
+  } catch(e) { console.error('[KYM]', e); }
+
+  // 降级：Google News RSS（与桌面端一致）
+  try {
+    const rssUrl = CORS + encodeURIComponent('https://news.google.com/rss/search?q=viral+meme+funny+trending&hl=en-US&gl=US&ceid=US:en');
+    const r = await fetch(rssUrl);
+    const xmlText = await r.text();
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(xmlText, 'text/xml');
+    const items = [];
+    const kws = ['meme','viral','tiktok','funny','trend','internet'];
+    xml.querySelectorAll('item').forEach(item => {
+      if(items.length >= limit) return;
+      const t = item.querySelector('title')?.textContent;
+      if(t && kws.some(k => t.toLowerCase().includes(k))) {
+        items.push({
+          id:'meme_'+btoa(t).slice(0,12),
+          title: t.trim(),
+          source: item.querySelector('source')?.textContent || 'Google News',
+          url: item.querySelector('link')?.textContent || ''
+        });
       }
     });
-    return items;
-  } catch(e) { return []; }
+    if(items.length > 0) return items;
+  } catch(e) { console.error('[MemeGoogleNews]', e); }
+
+  return [{id:'meme_notice', title:'⚠️ Meme 数据源暂时不可用', source:'系统提示', url:''}];
 }
 
 async function fetchYouTube() {
