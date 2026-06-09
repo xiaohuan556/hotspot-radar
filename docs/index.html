@@ -71,10 +71,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;b
 
 <script>
 // ===== 配置 =====
-// API 基础地址：留空表示同域（Flask 直接提供服务）
-// 部署到 GitHub Pages 后，改成 Flask 后端的公网地址，例如：
-// const API_BASE = 'https://hotspot-radar.onrender.com';
-const API_BASE = '';
+const PROXIES = [
+  'https://corsproxy.io/?',
+  'https://api.allorigins.win/raw?url=',
+];
+
+async function proxyFetch(url) {
+  // 依次尝试多个 CORS 代理
+  for (const proxy of PROXIES) {
+    try {
+      const r = await fetch(proxy + encodeURIComponent(url));
+      if (r.ok) return r;
+    } catch(e) { continue; }
+  }
+  throw new Error('All CORS proxies failed for: ' + url);
+}
 
 const CATS = [
   {name:'🔥 热门Meme',  color:'#E0646E'},
@@ -88,21 +99,214 @@ const CATS = [
 let allData = {};
 let currentIdx = 0;
 
-// ===== 数据获取：全部走后端 API =====
-async function apiGet(path) {
-  const r = await fetch(API_BASE + path);
-  if(!r.ok) throw new Error('API ' + r.status);
-  return r.json();
+// ═══════════════ 数据获取（与 app.py 完全一致） ═══════════════
+
+// 1) 热门Meme: KYM → Reddit → Google News（与 app.py fetch_memes 对齐）
+async function fetchMemes(limit=15) {
+  // 优先：Know Your Meme（与 app.py fetch_meme_fallback 对齐）
+  try {
+    const r = await proxyFetch('https://knowyourmeme.com/memes');
+    const text = await r.text();
+    const items = [];
+    const seen = new Set();
+    const pattern = /<a[^>]+href="(\/memes\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = pattern.exec(text)) !== null && items.length < limit) {
+      const href = m[1], block = m[2];
+      if (href.includes('page/')) continue;
+      let title = '';
+      const h3m = block.match(/<h3[^>]+class="title"[^>]*>([^<]+)<\/h3>/i);
+      if (h3m) { title = h3m[1].trim(); }
+      else {
+        const spm = block.match(/<span[^>]*>([^<]+)<\/span>/i);
+        if (spm) title = spm[1].trim();
+      }
+      if (!title || seen.has(title) || title.length < 3) continue;
+      if (['meme','subculture','event','entry','photo','video','image'].includes(title.toLowerCase())) continue;
+      seen.add(title);
+      items.push({
+        id:'kym_'+btoa(unescape(encodeURIComponent(title))).slice(0,12),
+        title, source:'Know Your Meme',
+        url:'https://knowyourmeme.com'+href, score:0
+      });
+    }
+    if (items.length > 0) return items;
+  } catch(e) { console.warn('[Meme KYM]', e); }
+
+  // 备用：Reddit memes（与 app.py fetch_reddit 对齐）
+  try {
+    const r = await proxyFetch('https://www.reddit.com/r/memes+dankmemes+me_irl+funny/hot.json?limit=' + limit);
+    const data = await r.json();
+    const items = (data.data?.children || []).filter(p => !p.data.stickied).map(p => {
+      const d = p.data;
+      return { id:'r_'+d.id, title:d.title, source:'r/'+d.subreddit, url:'https://reddit.com'+d.permalink, score:d.score||0 };
+    });
+    if (items.length > 0) return items;
+  } catch(e) { console.warn('[Meme Reddit]', e); }
+
+  // 兜底：Google News meme（与 app.py fetch_meme_fallback 降级对齐）
+  try {
+    const r = await proxyFetch('https://news.google.com/rss/search?q=viral+meme+funny+trending&hl=en-US&gl=US&ceid=US:en');
+    const text = await r.text();
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+    const items = [];
+    const kws = ['meme','viral','tiktok','funny','trend','internet'];
+    xml.querySelectorAll('item').forEach(item => {
+      if (items.length >= limit) return;
+      const t = item.querySelector('title')?.textContent;
+      if (t && kws.some(k => t.toLowerCase().includes(k))) {
+        items.push({
+          id:'meme_'+btoa(unescape(encodeURIComponent(t))).slice(0,12),
+          title:t.trim(), source:item.querySelector('source')?.textContent||'Google News',
+          url:item.querySelector('link')?.textContent||'', score:0
+        });
+      }
+    });
+    if (items.length > 0) return items;
+  } catch(e) { console.warn('[Meme GoogleNews]', e); }
+
+  return [];
 }
 
+// 2) 娱乐新闻: NewsAPI + RSS（与 app.py fetch_newsapi + fetch_rss 对齐）
+async function fetchEntertainment() {
+  const items = [];
+  // NewsAPI
+  try {
+    const q = 'entertainment+OR+celebrity+OR+Hollywood';
+    const r = await proxyFetch('https://newsapi.org/v2/everything?q='+q+'&language=en&sortBy=popularity&pageSize=10&apiKey=3bd17c719f174ce797556f31ffe01f64');
+    const data = await r.json();
+    (data.articles||[]).forEach(a => {
+      items.push({
+        id:'n_'+btoa(unescape(encodeURIComponent(a.url))).slice(0,12),
+        title:a.title, source:a.source?.name||'News', url:a.url, score:0
+      });
+    });
+  } catch(e) { console.warn('[NewsAPI entertainment]', e); }
+
+  // RSS: entertainment feeds（与 app.py RSS_FEEDS 对齐）
+  const feeds = [
+    ['Variety','https://variety.com/feed/'],
+    ['Deadline','https://deadline.com/feed/'],
+    ['Hollywood Reporter','https://feeds.feedburner.com/thr/news'],
+    ['Billboard','https://www.billboard.com/feed/'],
+  ];
+  for (const [name, url] of feeds) {
+    try {
+      const r = await proxyFetch(url);
+      const text = await r.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      xml.querySelectorAll('item').forEach(item => {
+        const t = item.querySelector('title')?.textContent;
+        const l = item.querySelector('link')?.textContent;
+        if (t) items.push({ id:'rss_'+btoa(unescape(encodeURIComponent(t))).slice(0,12), title:t.trim(), source:name, url:l||'', score:0 });
+      });
+    } catch(e) {}
+  }
+  return items;
+}
+
+// 3) 电影资讯: TMDB（与 app.py fetch_tmdb 对齐）
+async function fetchTMDB() {
+  const items = [];
+  const key = '9f842807e0c4919d22ad8903bbd210a4';
+  for (const ep of ['/movie/upcoming','/trending/movie/week']) {
+    try {
+      const r = await fetch('https://api.themoviedb.org/3'+ep+'?api_key='+key+'&language=zh-CN&region=US');
+      const data = await r.json();
+      (data.results||[]).slice(0,10).forEach(i => {
+        items.push({
+          id:'tmdb_'+i.id, title:i.title, source:'TMDB',
+          url:'https://www.themoviedb.org/movie/'+i.id,
+          score:Math.round((i.vote_average||0)*100)
+        });
+      });
+    } catch(e) { console.warn('[TMDB]', e); }
+  }
+  return items;
+}
+
+// 4) 体育热点: RSS（与 app.py fetch_rss sports 对齐）
+async function fetchSports() {
+  const items = [];
+  const feeds = [
+    ['ESPN','https://www.espn.com/espn/rss/news'],
+    ['BBC Sport','https://feeds.bbci.co.uk/sport/rss.xml'],
+    ['Yahoo Sports','https://sports.yahoo.com/rss/'],
+  ];
+  for (const [name, url] of feeds) {
+    try {
+      const r = await proxyFetch(url);
+      const text = await r.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      xml.querySelectorAll('item').forEach(item => {
+        const t = item.querySelector('title')?.textContent;
+        const l = item.querySelector('link')?.textContent;
+        if (t) items.push({ id:'rss_'+btoa(unescape(encodeURIComponent(t))).slice(0,12), title:t.trim(), source:name, url:l||'', score:0 });
+      });
+    } catch(e) {}
+  }
+  return items;
+}
+
+// 5) 视频热点: YouTube（与 app.py fetch_youtube 对齐）
+async function fetchYouTube() {
+  try {
+    const key = 'AIzaSyAFsEN9EiBrn9mZzmh3Yl1fMIdBCZMv8FM';
+    const r = await fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&regionCode=US&maxResults=12&key='+key);
+    const data = await r.json();
+    return (data.items||[]).map(i => ({
+      id:'yt_'+i.id, title:i.snippet.title, source:i.snippet.channelTitle,
+      url:'https://youtube.com/watch?v='+i.id, score:0
+    }));
+  } catch(e) { console.warn('[YouTube]', e); return []; }
+}
+
+// 6) 搜索趋势: Google Trends RSS（与 app.py fetch_google_trends 对齐）
+async function fetchGoogleTrends(limit=20) {
+  try {
+    const r = await proxyFetch('https://trends.google.com/trending/rss?geo=US');
+    const text = await r.text();
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+    const items = [];
+    xml.querySelectorAll('item').forEach((item, i) => {
+      if (i >= limit) return;
+      const t = item.querySelector('title')?.textContent;
+      const traffic = item.getElementsByTagName('ht:approx_traffic')[0]?.textContent
+                   || item.querySelector('approx_traffic')?.textContent || '';
+      const newsTitle = item.getElementsByTagName('ht:news_item_title')[0]?.textContent
+                      || item.querySelector('news_item_title')?.textContent || '';
+      const newsUrl = item.getElementsByTagName('ht:news_item_url')[0]?.textContent
+                    || item.querySelector('news_item_url')?.textContent || '';
+      if (t) items.push({
+        id:'gtr_'+btoa(unescape(encodeURIComponent(t))).slice(0,12),
+        title:t.trim(), source:'Google Trends',
+        url: newsUrl || 'https://trends.google.com/trends/explore?q='+encodeURIComponent(t.trim()),
+        score:0, desc: newsTitle || (traffic ? '搜索量: '+traffic : '')
+      });
+    });
+    return items;
+  } catch(e) { console.warn('[GoogleTrends]', e); return []; }
+}
+
+// 翻译（DeepSeek）
 async function translateText(text) {
-  const r = await fetch(API_BASE + '/api/translate', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({text:text})
-  });
-  const d = await r.json();
-  return d.translated || '⚠️ 翻译失败';
+  try {
+    const r = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method:'POST',
+      headers:{'Authorization':'Bearer sk-2b1544c282cd44709b2408745f77726c','Content-Type':'application/json'},
+      body:JSON.stringify({model:'deepseek-chat',messages:[
+        {role:'system',content:'翻译为中文，只输出译文，不要解释。'},
+        {role:'user',content:text}
+      ],temperature:0.3,max_tokens:100})
+    });
+    const d = await r.json();
+    return d.choices?.[0]?.message?.content?.trim() || '⚠️ 翻译失败';
+  } catch(e) { return '⚠️ 翻译失败'; }
 }
 
 // ===== 刷新 =====
@@ -112,19 +316,28 @@ async function refresh() {
   const stat = document.getElementById('status');
   btn.disabled = true;
   btn.textContent = '⏳ 获取中…';
-  prog.style.width = '30%';
+  prog.style.width = '10%';
   stat.textContent = '正在拉取海外热点…';
 
-  try {
-    const data = await apiGet('/api/refresh');
-    allData = data;
-    for(let i = 0; i < CATS.length; i++) renderPanel(i);
-    prog.style.width = '100%';
-    stat.textContent = '✅ 热点更新完成';
-  } catch(e) {
-    prog.style.width = '100%';
-    stat.textContent = '❌ 获取失败：' + e.message;
+  const tasks = [
+    ['🔥 热门Meme',  () => fetchMemes(15)],
+    ['🌟 娱乐新闻',  () => fetchEntertainment()],
+    ['🎬 电影资讯',  () => fetchTMDB()],
+    ['🏈 体育热点',  () => fetchSports()],
+    ['📹 视频热点',  () => fetchYouTube()],
+    ['🔍 搜索趋势',  () => fetchGoogleTrends(20)],
+  ];
+
+  for (let i = 0; i < tasks.length; i++) {
+    const [cat, fn] = tasks[i];
+    prog.style.width = (10 + (i / tasks.length) * 85) + '%';
+    stat.textContent = '⏳ 获取 ' + cat + '…';
+    try { allData[cat] = await fn(); }
+    catch(e) { allData[cat] = []; console.error('['+cat+']', e); }
+    renderPanel(i);
   }
+  prog.style.width = '100%';
+  stat.textContent = '✅ 热点更新完成';
   setTimeout(() => prog.style.width = '0%', 2000);
   btn.disabled = false;
   btn.textContent = '🔄 刷新热点';
@@ -136,14 +349,12 @@ function initUI(){
   const contentEl = document.getElementById('content');
   CATS.forEach((cat, i) => {
     const b = document.createElement('button');
-    b.className = 'tab';
-    b.textContent = cat.name;
+    b.className = 'tab'; b.textContent = cat.name;
     b.style.setProperty('--tab-color', cat.color);
     b.onclick = () => switchTab(i);
     tabsEl.appendChild(b);
     const p = document.createElement('div');
-    p.className = 'panel';
-    p.id = 'panel-' + i;
+    p.className = 'panel'; p.id = 'panel-' + i;
     p.style.setProperty('--cat-color', cat.color);
     p.style.setProperty('--cat-color-bg', cat.color + '10');
     contentEl.appendChild(p);
@@ -162,11 +373,10 @@ function renderPanel(i){
   const items = allData[cat.name] || [];
   const shown = items.slice(0, 20);
   const p = document.getElementById('panel-' + i);
-  if(!p) return;
-  let h = '';
-  h += '<div class="list-header"><span class="h-rank">#</span><span class="h-trans"></span><span class="h-bar"></span><span class="h-title">标题 / 来源</span><span class="h-actions"><button class="btn-translate-all" id="btnAll-' + i + '" ' + (shown.length ? '' : 'disabled') + ' onclick="translateAll(' + i + ')">全部翻译</button><span class="count">' + (shown.length ? shown.length + '条' : '暂无数据') + '</span></span></div>';
+  if (!p) return;
+  let h = '<div class="list-header"><span class="h-rank">#</span><span class="h-trans"></span><span class="h-bar"></span><span class="h-title">标题 / 来源</span><span class="h-actions"><button class="btn-translate-all" id="btnAll-' + i + '" ' + (shown.length ? '' : 'disabled') + ' onclick="translateAll(' + i + ')">全部翻译</button><span class="count">' + (shown.length ? shown.length + '条' : '暂无数据') + '</span></span></div>';
   h += '<div class="divider"></div><div class="item-list">';
-  if(!shown.length) {
+  if (!shown.length) {
     h += '<div class="hint">暂无数据</div>';
   } else {
     shown.forEach((it, n) => {
@@ -188,17 +398,14 @@ function renderPanel(i){
   p.innerHTML = h;
 }
 
-function openLink(el){
-  const u = el.dataset.url;
-  if(u) window.open(u, '_blank');
-}
+function openLink(el){ const u = el.dataset.url; if (u) window.open(u, '_blank'); }
 
 async function translateOne(btn, catIdx, itemIdx){
   const item = allData[CATS[catIdx].name]?.[itemIdx];
-  if(!item) return;
+  if (!item) return;
   const titleEl = btn.parentElement.querySelector('.i-title');
   const org = titleEl.dataset.org;
-  if(btn.classList.contains('done')){
+  if (btn.classList.contains('done')) {
     titleEl.textContent = org;
     titleEl.classList.remove('translated');
     btn.textContent = '译';
@@ -213,23 +420,19 @@ async function translateOne(btn, catIdx, itemIdx){
     titleEl.classList.add('translated');
     btn.classList.add('done');
     btn.textContent = '↩';
-  } catch(e) {
-    titleEl.textContent = '⚠️ 失败';
-    btn.textContent = '译';
-  }
+  } catch(e) { titleEl.textContent = '⚠️ 失败'; btn.textContent = '译'; }
   btn.disabled = false;
 }
 
 async function translateAll(catIdx){
-  const items = allData[CATS[catIdx].name] || [];
   const p = document.getElementById('panel-' + catIdx);
   const btnAll = p.querySelector('.btn-translate-all');
   btnAll.disabled = true;
   const titles = p.querySelectorAll('.i-title');
   const btns = p.querySelectorAll('.i-trans');
   let done = 0, total = titles.length;
-  for(let i = 0; i < total; i++){
-    if(btns[i].classList.contains('done')){ done++; continue; }
+  for (let i = 0; i < total; i++) {
+    if (btns[i].classList.contains('done')) { done++; continue; }
     btnAll.textContent = done + '/' + total;
     btns[i].disabled = true;
     btns[i].textContent = '⏳';
@@ -239,9 +442,7 @@ async function translateAll(catIdx){
       titles[i].classList.add('translated');
       btns[i].classList.add('done');
       btns[i].textContent = '↩';
-    } catch(e) {
-      btns[i].textContent = '⚠️';
-    }
+    } catch(e) { btns[i].textContent = '⚠️'; }
     btns[i].disabled = false;
     done++;
     btnAll.textContent = done + '/' + total;
