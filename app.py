@@ -7,9 +7,24 @@ from urllib.parse import urlencode, quote
 import xml.etree.ElementTree as ET
 import threading
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, make_response
 
-# ── .env ──
+app = Flask(__name__)
+
+# ── CORS 全局处理（允许 GitHub Pages 跨域调用）──
+@app.before_request
+def handle_options():
+    if request.method == "OPTIONS":
+        resp = app.make_default_options_response()
+        resp.headers["Access-Control-Allow-Origin"]  = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return resp
+
+@app.after_request
+def add_cors(resp):
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
 PROJECT = Path(__file__).parent
 ENV_FILE = PROJECT / ".env"
 if ENV_FILE.exists():
@@ -38,8 +53,6 @@ CAT_COLORS = {
     "🔍 搜索趋势": "#8B7CF6",
 }
 CAT_KEYS = list(CAT_COLORS.keys())
-
-app = Flask(__name__)
 
 # ═══════════════ 数据获取（和 main.py 完全一致） ═══════════════
 
