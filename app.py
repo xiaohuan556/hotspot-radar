@@ -31,6 +31,7 @@ import html
 import hashlib
 import threading
 from pathlib import Path
+from datetime import date
 from urllib.request import urlopen, Request
 from urllib.parse import urlencode, quote
 import xml.etree.ElementTree as ET
@@ -636,31 +637,56 @@ def _hs_fetch_now_showing(limit=80):
         seen.add(rid)
         results.append(item)
 
-    # ── 1) 正在热映的电影 (TMDB now_playing, popularity desc) ──
+    # ── 1) + 3) 电影：统一拉取后按 release_date 精确拆分 ──
     if _hs_key_valid(TMDB_KEY):
-        now_playing_raw = []
-        np_seen = set()
-        for region in ("US", "CN"):
-            for page in (1, 2):
-                data = _tmdb_fetch("/movie/now_playing", {"region": region, "page": page})
-                if not data:
-                    continue
-                for it in data.get("results", []):
-                    rid = it.get("id")
-                    if rid in np_seen:
+        all_movies = []
+        movie_seen = set()
+        # 正在上映 + 即将上映 多 region 多 page 全拉
+        for path, pages, regions in [
+            ("/movie/now_playing", (1, 2), ("US", "CN")),
+            ("/movie/upcoming", (1, 2, 3), ("US", "CN")),
+        ]:
+            for region in regions:
+                for page in range(pages[0], pages[-1] + 1):
+                    data = _tmdb_fetch(path, {"region": region, "page": page})
+                    if not data:
                         continue
-                    np_seen.add(rid)
-                    now_playing_raw.append((it, region))
-        now_playing_raw.sort(key=lambda x: float(x[0].get("popularity") or 0), reverse=True)
-        added = 0
-        for (it, region) in now_playing_raw:
-            if added >= limit_per_group:
+                    for it in data.get("results", []):
+                        rid = it.get("id")
+                        if rid in movie_seen:
+                            continue
+                        movie_seen.add(rid)
+                        all_movies.append(it)
+
+        today_str = date.today().isoformat()
+        now_playing = []
+        upcoming = []
+        for m in all_movies:
+            rel = (m.get("release_date") or "").strip()
+            if not rel:
+                continue
+            if rel <= today_str:
+                now_playing.append(m)
+            else:
+                upcoming.append(m)
+
+        # 正在热映 → popularity 降序
+        now_playing.sort(key=lambda x: float(x.get("popularity") or 0), reverse=True)
+        for rank, it in enumerate(now_playing, 1):
+            if rank > limit_per_group:
                 break
-            label = f"🎬 正在热映" + (f" ({region})" if added < 3 else "")
-            item = _tmdb_to_item(it, label, "正在热映的电影", rank=added + 1)
+            item = _tmdb_to_item(it, "🎬 正��热映", "正在热映的电影", rank=rank)
             if item.get("image"):
                 add(item)
-                added += 1
+
+        # 即将上映 → popularity 降序
+        upcoming.sort(key=lambda x: float(x.get("popularity") or 0), reverse=True)
+        for rank, it in enumerate(upcoming, 1):
+            if rank > limit_per_group:
+                break
+            item = _tmdb_to_item(it, "🎬 即将上映", "即将上映的热门电影", rank=rank)
+            if item.get("image"):
+                add(item)
 
     # ── 2) 今日播放的电视剧 (TMDB tv/airing_today, popularity desc) ──
     if _hs_key_valid(TMDB_KEY):
@@ -677,26 +703,7 @@ def _hs_fetch_now_showing(limit=80):
                 if item.get("image"):
                     add(item)
 
-    # ── 3) 即将上映的热门电影 (TMDB upcoming, popularity desc) ──
-    if _hs_key_valid(TMDB_KEY):
-        upcoming_raw = []
-        up_seen = set()
-        for region in ("US", "CN"):
-            for page in (1, 2, 3):
-                data = _tmdb_fetch("/movie/upcoming", {"region": region, "page": page})
-                if not data:
-                    continue
-                for it in data.get("results", []):
-                    rid = it.get("id")
-                    if rid in up_seen:
-                        continue
-                    up_seen.add(rid)
-                    upcoming_raw.append(it)
-        upcoming_raw.sort(key=lambda x: float(x.get("popularity") or 0), reverse=True)
-        for rank, it in enumerate(upcoming_raw, 1):
-            if rank > limit_per_group:
-                break
-            item = _tmdb_to_item(it, "🎬 即将上映", "即将上映的热门电影", rank=rank)
+    # ── 4) 正在热映的动漫 (豆瓣 日本动画，实时) ──
             if item.get("image"):
                 add(item)
 
