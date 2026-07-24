@@ -80,6 +80,10 @@
 
   .item-list { display:flex; flex-direction:column; gap:7px; }
   .sub-group-header { font-size:12px; font-weight:700; color:#64748B; padding:8px 4px 2px; margin-top:4px; border-bottom:1px solid #E2E8F0; letter-spacing:.3px; }
+  .sub-tab-bar { display:flex; gap:6px; padding:4px 0 12px; flex-wrap:wrap; }
+  .sub-tab { padding:5px 12px; border-radius:18px; border:1px solid var(--line); background:#fff; font-size:12px; font-weight:600; color:#64748B; cursor:pointer; }
+  .sub-tab.active { background:var(--cc); color:#fff; border-color:var(--cc); }
+  .sub-tab:hover:not(.active) { background:#F1F5F9; }
   .item {
     display:flex; align-items:center; gap:11px; padding:9px 13px; background:var(--panel);
     border:1px solid var(--line); border-radius:11px; cursor:pointer; transition:.14s;
@@ -270,9 +274,40 @@ function renderPanel(cat, items, summary) {
   const panel = document.getElementById('panel-'+CAT_KEYS.indexOf(cat));
   if (!panel) return;
   let html = '';
-  if (summary) {
-    html += `<div class="summary">${summary}</div>`;
+  if (summary) html += `<div class="summary">${summary}</div>`;
+
+  // ── 热映资讯：子标签页 ──
+  const isMovie = (cat === '🔥 热映资讯' || cat.includes('热映'));
+  if (isMovie && items.length) {
+    const groups = ['正在热映的电影','今日播放的电视剧','即将上映的热门电影','正在热映的动漫'];
+    const grouped = {};
+    groups.forEach(g => grouped[g] = []);
+    items.forEach(it => {
+      const g = it.sub_group || '';
+      if (grouped.hasOwnProperty(g)) grouped[g].push(it);
+    });
+    const activeGroup = panel.dataset.movieTab || groups.find(g => grouped[g].length) || groups[0];
+    panel.dataset.movieTab = activeGroup;
+    html += `<div class="list-head">
+      <span class="h-title">${cat}</span>
+      <span class="h-actions"><button class="btn-trans-all" data-cat="${cat}" onclick="translateAll('${cat}')">🌐 全部翻译</button>
+      <span class="count">${items.length} 条</span></span></div>`;
+    html += '<div class="sub-tab-bar">';
+    groups.forEach(g => {
+      const cls = (g === activeGroup) ? 'sub-tab active' : 'sub-tab';
+      const n = grouped[g].length;
+      html += `<button class="${cls}" onclick="switchMovieSubTab('${cat}','${g.replace(/'/g,"\\'")}')">${g} ${n ? '('+n+')' : ''}</button>`;
+    });
+    html += '</div><div class="item-list">';
+    (grouped[activeGroup] || []).forEach((it,i) => {
+      html += renderItemHTML(it, i+1, cat, i);
+    });
+    html += '</div>';
+    panel.innerHTML = html;
+    return;
   }
+
+  // ── 普通分类：平铺列表 ──
   html += `<div class="list-head">
     <span class="h-rank">#</span><span class="h-trans"></span><span class="h-title">标题 / 来源</span>
     <span class="h-actions">
@@ -281,65 +316,59 @@ function renderPanel(cat, items, summary) {
     </span></div>`;
   html += '<div class="item-list">';
   if (!items.length) {
-    html += `<div class="empty-card">${'\u26a0\ufe0f'} 该分类暂无数据。请检查网络后点击「刷新热点」，或在「设置」中调整数据源。</div>`;
+    html += '<div class="empty-card">⚠️ 该分类暂无数据。</div>';
   } else {
-    let lastGroup = '';
-    let rankInGroup = 0;
-    items.forEach((it,i) => {
-      const grp = it.sub_group || '';
-      if (grp && grp !== lastGroup) {
-        lastGroup = grp;
-        rankInGroup = 0;
-        html += `<div class="sub-group-header">${grp}</div>`;
-      }
-      if (grp) rankInGroup++;
-      const rank = grp ? rankInGroup : i+1;
-      const bcls = rank===1?'gold':rank===2?'silver':rank===3?'bronze':(it.hot?'hot':'plain');
-      const heat = (it.composite!=null)
-        ? (it.hot ? `<span class="heat hot">🔥${it.composite}</span>`
-                  : `<span class="heat plain">${it.composite}</span>`)
-        : (it.score ? `<span class="heat plain">⬆${it.score>=1000?(it.score/1000).toFixed(1)+'k':it.score}</span>` : '');
-      const phColor = CAT_COLORS[cat] || '#8B7CF6';
-      // 提取占位字母：跳过 #/emoji/空格 等无意义字符
-      let phLetter = '';
-      {
-        const raw = (it.title || it.source || '◆');
-        const stripped = raw.replace(/^[#\s]+/, '').trim();
-        for (const ch of stripped) {
-          if (/[A-Za-z0-9\u4e00-\u9fff]/.test(ch)) { phLetter = ch.toUpperCase(); break; }
-        }
-        if (!phLetter) phLetter = '◆';
-      }
-      // 缺图时用 hashtag 名 hash 出色相，每条都不一样
-      let thumbBg = phColor;
-      if (!it.image) {
-        const key = it.title || it.source || 'ph';
-        let h = 0;
-        for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
-        const hue = Math.abs(h) % 360;
-        thumbBg = `hsl(${hue}, 65%, 55%)`;
-      }
-      const img = it.image
-        ? `<img class="thumb" src="${it.image}" loading="lazy" data-ph="${phLetter}" onerror="imgFail(this,'${cat}')">`
-        : `<div class="thumb thumb-ph" style="background:${thumbBg};color:#fff">${phLetter}</div>`;
-      const title = (it.title||'').replace(/"/g,'&quot;');
-      const sub = (it.desc||'').replace(/</g,'&lt;');
-      html += `<div class="item" data-cat="${cat}" data-idx="${i}" data-url="${it.url||''}" onclick="openLink(this)">
-        <span class="badge ${bcls}">${String(rank).padStart(2,'0')}</span>
-        <button class="i-trans" data-cat="${cat}" data-idx="${i}" onclick="event.stopPropagation();translateOne(this)">译</button>
-        ${img}
-        <span class="i-bar"></span>
-        <div class="i-main">
-          <div class="i-title" data-original="${title}">${title}</div>
-          ${sub?`<div class="i-sub">${sub}</div>`:''}
-        </div>
-        ${it.source?`<span class="i-source" title="${it.source.replace(/"/g,'&quot;')}">${it.source}</span>`:''}
-        ${heat}
-      </div>`;
-    });
+    items.forEach((it,i) => { html += renderItemHTML(it, i+1, cat, i); });
   }
   html += '</div>';
   panel.innerHTML = html;
+}
+
+function switchMovieSubTab(cat, group) {
+  const panel = document.getElementById('panel-'+CAT_KEYS.indexOf(cat));
+  if (!panel) return;
+  panel.dataset.movieTab = group;
+  renderPanel(cat, allData[cat]||[], allSummaries[cat]||'');
+}
+
+function renderItemHTML(it, rank, cat, idx) {
+  const bcls = rank===1?'gold':rank===2?'silver':rank===3?'bronze':(it.hot?'hot':'plain');
+  const heat = (it.composite!=null)
+    ? (it.hot ? `<span class="heat hot">🔥${it.composite}</span>`
+              : `<span class="heat plain">${it.composite}</span>`)
+    : (it.score ? `<span class="heat plain">⬆${it.score>=1000?(it.score/1000).toFixed(1)+'k':it.score}</span>` : '');
+  const phColor = CAT_COLORS[cat] || '#8B7CF6';
+  let phLetter = '';
+  {
+    const raw = (it.title || it.source || '◆');
+    const stripped = raw.replace(/^[#\s]+/, '').trim();
+    for (const ch of stripped) {
+      if (/[A-Za-z0-9\u4e00-\u9fff]/.test(ch)) { phLetter = ch.toUpperCase(); break; }
+    }
+    if (!phLetter) phLetter = '◆';
+  }
+  let thumbBg = phColor;
+  if (!it.image) {
+    const key = it.title || it.source || 'ph';
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+    thumbBg = `hsl(${Math.abs(h) % 360}, 65%, 55%)`;
+  }
+  const img = it.image
+    ? `<img class="thumb" src="${it.image}" loading="lazy" data-ph="${phLetter}" onerror="imgFail(this,'${cat}')">`
+    : `<div class="thumb thumb-ph" style="background:${thumbBg};color:#fff">${phLetter}</div>`;
+  const title = (it.title||'').replace(/"/g,'&quot;');
+  const sub = (it.desc||'').replace(/</g,'&lt;');
+  return `<div class="item" data-cat="${cat}" data-idx="${idx}" data-url="${it.url||''}" onclick="openLink(this)">
+    <span class="badge ${bcls}">${String(rank).padStart(2,'0')}</span>
+    <button class="i-trans" data-cat="${cat}" data-idx="${idx}" onclick="event.stopPropagation();translateOne(this)">译</button>
+    ${img}<span class="i-bar"></span>
+    <div class="i-main">
+      <div class="i-title" data-original="${title}">${title}</div>
+      ${sub?`<div class="i-sub">${sub}</div>`:''}
+    </div>
+    ${it.source?`<span class="i-source" title="${it.source.replace(/"/g,'&quot;')}">${it.source}</span>`:''}
+    ${heat}</div>`;
 }
 
 function openLink(el){
