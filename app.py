@@ -637,49 +637,53 @@ def _hs_fetch_now_showing(limit=80):
         seen.add(rid)
         results.append(item)
 
-    # ── 1) + 3) 电影：统一拉取后按 release_date 精确拆分 ──
+    # ── 1) + 3) 电影：统一拉取后按 release_date 精确拆分，优先 CN 日期 ──
     if _hs_key_valid(TMDB_KEY):
-        all_movies = []
-        movie_seen = set()
-        # 正在上映 + 即将上映 多 region 多 page 全拉
-        for path, pages, regions in [
-            ("/movie/now_playing", (1, 2), ("US", "CN")),
-            ("/movie/upcoming", (1, 2, 3), ("US", "CN")),
-        ]:
-            for region in regions:
+        today_str = date.today().isoformat()
+        movie_map = {}
+
+        for path, pages in [("/movie/now_playing", (1, 2)), ("/movie/upcoming", (1, 2, 3))]:
+            for region in ("US", "CN"):
                 for page in range(pages[0], pages[-1] + 1):
                     data = _tmdb_fetch(path, {"region": region, "page": page})
                     if not data:
                         continue
                     for it in data.get("results", []):
                         rid = it.get("id")
-                        if rid in movie_seen:
+                        rel = (it.get("release_date") or "").strip()
+                        if not rel:
                             continue
-                        movie_seen.add(rid)
-                        all_movies.append(it)
+                        entry = movie_map.get(rid)
+                        if entry is None:
+                            movie_map[rid] = {"item": it, "release_date": rel,
+                                               "cn_date": rel if region == "CN" else "",
+                                               "us_date": rel if region == "US" else ""}
+                        else:
+                            if region == "CN" and not entry["cn_date"]:
+                                entry["cn_date"] = rel
+                            if region == "US" and not entry["us_date"]:
+                                entry["us_date"] = rel
+                            if region == "CN" and rel:
+                                entry["release_date"] = rel
 
-        today_str = date.today().isoformat()
-        now_playing = []
-        upcoming = []
-        for m in all_movies:
-            rel = (m.get("release_date") or "").strip()
-            if not rel:
-                continue
-            if rel <= today_str:
+        now_playing, upcoming = [], []
+        for rid, entry in movie_map.items():
+            display_date = entry["cn_date"] or entry["release_date"]
+            m = dict(entry["item"])
+            m["release_date"] = display_date
+            if display_date <= today_str:
                 now_playing.append(m)
             else:
                 upcoming.append(m)
 
-        # 正在热映 → popularity 降序
         now_playing.sort(key=lambda x: float(x.get("popularity") or 0), reverse=True)
         for rank, it in enumerate(now_playing, 1):
             if rank > limit_per_group:
                 break
-            item = _tmdb_to_item(it, "🎬 正��热映", "正在热映的电影", rank=rank)
+            item = _tmdb_to_item(it, "🎬 正在热映", "正在热映的电影", rank=rank)
             if item.get("image"):
                 add(item)
 
-        # 即将上映 → popularity 降序
         upcoming.sort(key=lambda x: float(x.get("popularity") or 0), reverse=True)
         for rank, it in enumerate(upcoming, 1):
             if rank > limit_per_group:
