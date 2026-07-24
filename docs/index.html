@@ -454,10 +454,28 @@ function renderPanel(cat, items, summary){
       const heat = (it.composite!=null) ? (it.hot?`<span class="heat hot">🔥${it.composite}</span>`:`<span class="heat plain">${it.composite}</span>`)
         : (it.score?`<span class="heat plain">⬆${it.score>=1000?(it.score/1000).toFixed(1)+'k':it.score}</span>`:'');
       const phColor = CAT_COLORS[cat] || '#8B7CF6';
-      const initial = ((it.source || it.title || '◆').trim().charAt(0)) || '◆';
+      // 提取占位字母：跳过 #/emoji/空格等无意义字符
+      let phLetter = '';
+      {
+        const raw = (it.title || it.source || '\u25c6');
+        const stripped = raw.replace(/^[#\s]+/, '').trim();
+        for (const ch of stripped) {
+          if (/[A-Za-z0-9\u4e00-\u9fff]/.test(ch)) { phLetter = ch.toUpperCase(); break; }
+        }
+        if (!phLetter) phLetter = '\u25c6';
+      }
+      // 缺图时用 hashtag 名 hash 出色相，每条都不一样
+      let thumbBg = phColor;
+      if (!it.image) {
+        const key = it.title || it.source || 'ph';
+        let h = 0;
+        for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+        const hue = Math.abs(h) % 360;
+        thumbBg = `hsl(${hue}, 65%, 55%)`;
+      }
       const img = it.image
-        ? `<img class="thumb" src="${it.image}" loading="lazy" data-ph="${initial}" onerror="imgFail(this,'${cat}')">`
-        : `<div class="thumb thumb-ph" style="background:${phColor};color:#fff">${initial}</div>`;
+        ? `<img class="thumb" src="${it.image}" loading="lazy" data-ph="${phLetter}" onerror="imgFail(this,'${cat}')">`
+        : `<div class="thumb thumb-ph" style="background:${thumbBg};color:#fff">${phLetter}</div>`;
       const title=(it.title||'').replace(/"/g,'&quot;'); const sub=(it.desc||'').replace(/</g,'&lt;');
       html+=`<div class="item" data-cat="${cat}" data-idx="${i}" data-url="${it.url||''}" onclick="openLink(this)">
         <span class="badge ${bcls}">${String(rank).padStart(2,'0')}</span>

@@ -504,7 +504,8 @@ def _hs_fetch_tiktok(limit=20):
                     if c not in existing:
                         g["covers"].append((w, c))
                         existing.add(c)
-    ranked = sorted(agg.items(), key=lambda kv: kv[1]["play"], reverse=True)[:limit]
+    # 主排序：独立视频数 n，避免同视频多 hashtag 数值并列；次：总播放量
+    ranked = sorted(agg.items(), key=lambda kv: (kv[1]["n"], kv[1]["play"]), reverse=True)[:limit]
     results = []
     seen = set()
     for tag, a in ranked:
