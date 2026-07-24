@@ -637,7 +637,7 @@ def _hs_fetch_now_showing(limit=80):
         seen.add(rid)
         results.append(item)
 
-    # ── 1) + 3) 电影：统一拉取后按 release_date 精确拆分，优先 CN 日期 ──
+    # ── 1) + 3) 电影：统一拉取后按 release_date 精确拆分，US 日期优先 ──
     if _hs_key_valid(TMDB_KEY):
         today_str = date.today().isoformat()
         movie_map = {}
@@ -663,12 +663,12 @@ def _hs_fetch_now_showing(limit=80):
                                 entry["cn_date"] = rel
                             if region == "US" and not entry["us_date"]:
                                 entry["us_date"] = rel
-                            if region == "CN" and rel:
+                            if region == "US" and rel:
                                 entry["release_date"] = rel
 
         now_playing, upcoming = [], []
         for rid, entry in movie_map.items():
-            display_date = entry["cn_date"] or entry["release_date"]
+            display_date = entry["us_date"] or entry["release_date"]
             m = dict(entry["item"])
             m["release_date"] = display_date
             if display_date <= today_str:
